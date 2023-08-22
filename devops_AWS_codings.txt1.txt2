@@ -1,0 +1,419 @@
+HTTP NORMAL METHOD CONNECT:-
+
+sudo su -
+yum update -y
+yum install httpd -y
+systemctl start httpd
+systemctl status httpd
+===========================================================================================================================================================================================
+
+USER DATA AND SECURITY GROUP:-
+
+#!/bin/bush
+yum update -y
+yum install httpd -y
+systemctl start httpd
+systemctl status httpd
+
+===========================================================================================================================================================================================
+
+
+AUTO SCALING GROUP:-
+
+#!/bin/bash                                                                                                                     
+yum update -y
+yum install -y httpd
+systemctl start httpd
+systemctl enable httpd
+EC2AZ=$(curl -s http://169.254.169.254/latest/meta-data/placement/availability-zone)
+echo '<center><h1>This Amazon EC2 instance is located in Availability Zone: AZID </h1></center>' > /var/www/html/index.txt
+sed "s/AZID/$EC2AZ/" /var/www/html/index.txt > /var/www/html/index.html
+===========================================================================================================================================================================================
+
+NAGIOS CORE :
+1. Login to the AWS account.
+2. Create two instances one is for “nagios_server” and another for “remote_monitoring” client.
+3. Connect to the nagios_server and install or configure the nagios.
+a) To install and configure the nagios_server follow the below steps:
+$ vi nagios.sh
+yum -y install httpd php gcc glibc glibc-common wget perl gd gd-devel unzip zip
+useradd nagios
+groupadd nagcmd
+usermod -a -G nagcmd nagios
+usermod -a -G nagcmd apache
+cd /tmp/
+wget https://assets.nagios.com/downloads/nagioscore/releases/nagios-4.3.2.tar.gz
+tar -zxvf nagios-4.3.2.tar.gz
+cd /tmp/nagios-4.3.2
+./configure --with-nagios-group=nagios --with-command-group=nagcmd
+make all
+make install
+make install-init
+make install-config
+make install-commandmode
+make install-webconf
+make install-exfoliation
+systemctl restart httpd
+systemctl enable httpd
+htpasswd -c /usr/local/nagios/etc/htpasswd.users nagiosadmin
+:wq -->  sh nagios.sh
+New password:<Enter the password>
+Re-type new password:<Retype the same password>
+4. Copy the “Public_IP” of the instance and paste it in the chrome along with /nagios
+<Public_IP>/nagios
+6. Now we have to install the nagios plugin in the nagios_server to do it follow below steps
+$ vi nagios_plugin.sh
+cd /tmp
+wget https://nagios-plugins.org/download/nagios-plugins-2.2.1.tar.gz
+tar -zxvf nagios-plugins-2.2.1.tar.gz
+cd /tmp/nagios-plugins-2.2.1/
+./configure --with-nagios-user=nagios --with-nagios-group=nagios
+make
+make install
+/usr/local/nagios/bin/nagios -v /usr/local/nagios/etc/nagios.cfg
+service nagios start
+chkconfig nagios on
+:wq > sh nagios_plugin.sh
+
+--=======================================================================================================================================================================================------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+sak_shetty
+  6:29 PM
+ON REMOTE MONITORING CLIENT SERVER :
+7. Connect the instance of remote_monitoring
+8. Install nagios plugin
+9. Install NRPE plugin → Nagios Remote Plugin Executor (NRPE)
+a) To install the nagios plugin and NRPE plugin follow the below steps
+$ rpm -ivh https://dl.fedoraproject.org/pub/epel/epel-release-latest-7.noarch.rpm
+$ yum install -y nrpe nagios-plugins-all
+10. Go to the “nrpe.cfg” file and add the Public_IP in the sectioned called allowed hosts as shown below, In the same file you can also see there are commands to check several services of the remote server
+$ vi /etc/nagios/nrpe.cfg
+allowed_hosts=127.0.0.1,<public_ip of the nagios_server>
+command[check_users]=/usr/lib64/nagios/plugins/check_users -w 5 -c 10
+command[check_load]=/usr/lib64/nagios/plugins/check_load -r -w .15,.10,.05 -c .30,.25,.20
+command[check_hda1]=/usr/lib64/nagios/plugins/check_disk -w 20% -c 10% -p /dev/hda1
+command[check_zombie_procs]=/usr/lib64/nagios/plugins/check_procs -w 5 -c 10 -s Z
+command[check_total_procs]=/usr/lib64/nagios/plugins/check_procs -w 150 -c 200
+11. Start the NRPE service by typing the below command
+$ systemctl start nrpe
+12. Enable the NRPE service by typing the below command
+$ systemctl enable nrpe
+ON NAGIOS SERVER :
+13. Install the NRPE plugin
+a) To install follow the steps given below
+$ rpm -ivh https://dl.fedoraproject.org/pub/epel/epel-release-latest-7.noarch.rpm
+$ yum -y install nagios-plugins-nrpe
+14. Go to the file given below and add the or comment the section mentioned below
+$ vi /usr/local/nagios/etc/nagios.cfg
+$ cfg_dir=/usr/local/nagios/etc/servers
+15. Create one folder called servers in the below mentioned path
+$ mkdir /usr/local/nagios/etc/servers
+16. Go to commands.cfg file and add the following Nagios command definition to the file.
+$ vi /usr/local/nagios/etc/objects/commands.cfg
+# .check_nrpe. command definition
+define command {
+command_name check_nrpe
+command_line /usr/lib64/nagios/plugins/check_nrpe -H $HOSTADDRESS$ -t 30 -c $ARG1$
+}
+17. Now go to the servers directory that already created in the 15th step , create one file with .cfg extension and add the content mentioned below
+$ cd /usr/local/nagios/etc/servers
+$ vi hosts.cfg ← Public IP address as per remote_monitoring
+define host{
+use linux-server
+host_name TestFreshers
+alias TestFreshers
+address 13.233.64.134
+}
+define hostgroup{
+hostgroup_name linux-server
+alias Linux Servers
+members TestFreshers
+}
+define service{
+use local-service
+host_name TestFreshers
+service_description SWAP Usage
+check_command check_nrpe!check_swap
+}
+define service{
+use local-service
+host_name TestFreshers
+service_description Root / Partition
+check_command check_nrpe!check_root
+}
+define service{
+use local-service
+host_name TestFreshers
+service_description Current Users
+check_command check_nrpe!check_users
+}
+define service{
+use local-service
+host_name TestFreshers
+service_description Total Processes
+check_command check_nrpe!check_total_procs
+}
+define service{
+use local-service
+host_name TestFreshers
+service_description Current Load
+check_command check_nrpe!check_load
+}
+18. Check is there any errors in the nagios server by typing the command given below
+$ /usr/local/nagios/bin/nagios -v /usr/local/nagios/etc/nagios.cfg
+19. Restart the Nagios by using the command given below
+$ systemctl restart nagios
+20. Now go and check in Nagios website your host will be added but it will be down so we have to add the ping security group in the nagios_server and remote_hosting server security groups
+> ALL ICMP - IPV4
+
+----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+GIT CODINGS:-
+
+
+git init
+   10  ls
+   11  git status
+   12  git add login.txt
+   13  git status
+   14  git commit -m "first time"
+   15  git config --global user.email "shreyasrockingreings@gmail.com"
+   16  git config --global user.email
+   17  git config --global user.name "SHREYAS14012002"
+   18  git config --global user.name
+   19  git config --all
+   20  git config --global --all
+   21  git config --global --list
+   22  git commit -m "first time"
+   23  git remote -h
+   24  git remote -v
+   25  git remote add origin https://github.com/SHREYAS14012002/sample.git
+   26  git remote -v
+   27  git push origin master
+   28  pwd
+   29  ls
+   30  cat login.txt
+   31  git status
+   32  git add login.txt
+   33  git status
+   34  git commit -m "second time"
+   35  git remote -v
+   36  git push origin master
+   37  ls
+   38  vi login.txt
+   39  cat login.txt
+   40  git status
+   41  git add login.txt
+   42  git status
+   43  git status
+   44  cat login.txt
+   45  git commit -m "testing"
+   46  git push origin master
+   47  git log
+   48  git log -p
+   49  git log --oneline
+   50  vi login.txt
+   51  git status
+   52  git add .
+   53  git status
+   54  git commit -m "info of commits"
+   55  git log --oneline
+   56  vi login.txt
+   57  cat login.txt
+   58  git status
+   59  git add .
+   60  git status
+   61  git commit -m "to check"
+   62  git log --oneline
+   63  git push origin master
+   64  git log --oneline
+   65  history
+
+===============================================================================================================================================
+71  git init
+   72  vi demo.txt
+   73  git status
+   74  git add .
+   75  git commit -m "m1"
+   76  cat demo.txt
+   77  git remote add origin https://github.com/SHREYAS14012002/Demo.git
+   78  git log --oneline
+   79  git push origin master
+   80  ls
+   81  vi demo.txt
+   82  git status
+   83  git add .
+   84  git status
+   85  git commit -m "m2"
+   86  cat demo.txt
+   87  git push origin master
+   88  git log --oneline
+   89  ls
+   90  vi demo.txt
+   91  cat demo.txt
+   92  git status
+   93  git add .
+   94  git commit -m "m3"
+   95  git push origin master
+   96  git log --oneline
+   97  git push origin master
+   98  ls
+   99  vi demo.txt
+  100  cat demo.txt
+  101  git status
+  102  git add .
+  103  git commit -m "m4"
+  104  git push origin master
+  105  git log --oneline
+  106  history
+  107  git branch
+  108  git branch -h
+  109  git checkout -h
+  110  git checkout -b dev
+  111  git branch
+  112  ls
+  113  vi demo.txt
+  114  cat demo.txt
+  115  git status
+  116  git add .
+  117  git status
+  118  git commit -m "d1"
+  119  git push origin dev
+  120  git log --oneline
+  121  ls
+  122  vi demo.txt
+  123  git status
+  124  git add .
+  125  git commit -m "d2"
+  126  git push origin dev
+  127  git log --oneline
+  128  ls
+  129  git switch master
+  130  ls
+  131  cat demo.txt
+  132  git merge dev
+  133  cat demo.txt
+  134  git status
+  135  git switch dev
+  136  ls
+  137  git status
+  138  vi demo.txt
+  139  git status
+  140  git add .
+  141  git commit -m "d3"
+  142  git push origin dev
+  143  git log --oneline
+  144  git clone https://github.com/SHREYAS14012002/Demo.git
+  145  ls
+  146  cd Demo
+  147  ls
+  148  cat demo.txt
+  149  git switch dev
+  150  ls
+  151  cat demo.txt
+  152  cd ..
+  153  git switch master
+  154  ls
+  155  cat demo
+  156  cat demo.txt
+  157  ls
+  158  ls
+  159  cd Demo
+  160  pwd
+  161  ls
+  162  cat demo.txt
+  163  git switch master
+  164  ls
+  165  cat demo.txt
+  166  cd ..
+  167  ls
+  168  rmdir Demo
+  169  rm -rf Demo
+  170  ls
+  171  cat demo.txt
+  172  git status
+  173  git add .
+  174  git status
+  175  git commit -m "m5"
+  176  git push origin master
+  177  git log --oneline
+  178  git switch dev
+  179  git log --oneline
+  180  git log -p
+  181  history
+
+=============================================================================================================================
++ git init
+  442  git status
+  443  touch a.txt b.txt c.txt
+  444  ls
+  445  git status
+  446  git add .
+  447  git status
+  448  git reset a.txt
+  449  git status
+  450  git reset b.txt
+  451  git reset c.txt
+  452  git status
+  453  touch sample.confg
+  454  ls
+  455  git status
+  456  vi .gitignore
+  457  cat .git
+  458  cat .gitignore
+  459  git status
+  460  echo "testing" > sample.confg
+  461  git status
+  462  cat .gitignore
+  463  vi .gitignore
+  464  git status
+  465  history
+  466  ls
+  467  rm -rf a.txt b.txt c.txt sample.confg
+  468  ls
+  469  git status
+  470  rm -rf .gitignore
+  471  echo "m1" > sample.txt
+  472  cat sample.txt
+  473  git status
+  474  git add .
+  475  git commit -m "m1 co"
+  476  git branch
+  477  git checkout -b branch1
+  478  echo "b1" > chat.txt
+  479  cat chat.txt
+  480  git add .
+  481  git commit -m "b1 co"
+  482  git log --oneline
+  483  git checkout master
+  484  echo "n1" > call.txt
+  485  cat call.txt
+  486  ls
+  487  git status
+  488  git add .
+  489  git commit -m "n1 co"
+  490  git log --oneline
+  491  git checkout branch1
+  492  git rebase master
+  493  git log --oneline
+  494  git switch master
+  495  git merge branch1
+  496  git checkout -d branch1
+  497  git log --oneline
+  498  ls
+  499  cat chat.txt
+  500  git init
+  501  git remote add origin https://github.com/SHREYAS14012002/project-snapchat.git
+  502  ls
+  503  git fetch
+  504  ls
+  505  git pull origin master
+  506  ls
+  507  git branch
+  508  git pull origin dev
+  509  ls
+  510  git branch
+  511  git checkout dev v
+  512  git checkout dev
+  513  ls
+  514  git switch master
+  515  git fetch -h
+  516  history
